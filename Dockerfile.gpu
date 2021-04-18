@@ -1,34 +1,108 @@
-FROM ovhcom/ai-training-one-for-all
-RUN apt-get update -y && apt-get install -y \
-	autoconf \
-	nasm \
-	automake \
-	libtool \
-	cmake \
-	libsm6 \
-	libxext6 \
-	libxrender-dev 
+FROM ovhcom/ai-training-one-for-all:latest
 
+RUN chsh -s /bin/bash
+ENV SHELL=/bin/bash
+RUN curl https://packages.cloud.google.com/apt/doc/apt-key.gpg |  apt-key add -
+
+RUN apt-get update && apt-get install -y \
+    man \
+    vim \
+    nano \
+    htop \
+    curl \
+    wget \
+    rsync \
+    ca-certificates \
+    git \
+    zip \
+    procps \
+    ssh \
+    supervisor \
+    gettext-base \
+    autoconf \
+    nasm \
+    automake \
+    libtool \
+    cmake \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    build-essential \
+    libssl-dev \
+    libffi-dev \
+    libsasl2-dev \
+    libldap2-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # cleaning existing dlib
-RUN conda uninstall dlib -y || echo "dlib not found skipping conda cleaning"
-
-RUN pip uninstall dlib -y
-
-RUN rm -rf /opt/conda/lib/python3.7/site-packages/dlib
+RUN conda uninstall dlib -y || echo "dlib not found skipping conda cleaning" && \
+    pip3 uninstall dlib -y && \
+    rm -rf /opt/conda/lib/python3.7/site-packages/dlib
 
 # install cuda supported dlib
 RUN git clone -b 'v19.16' --single-branch https://github.com/davisking/dlib.git /tmp/dlib
 
-WORKDIR /tmp/dlib
-
-RUN mkdir build
-
-RUN cd build && cmake .. -DDLIB_USE_CUDA=1 -DUSE_AVX_INSTRUCTIONS=1 && cmake --build .
-
-RUN python setup.py install --set USE_AVX_INSTRUCTIONS=1 --set DLIB_USE_CUDA=1
+# buiding dlib
+RUN cd /tmp/dlib && \
+    mkdir build && \
+    cd build && \
+    cmake .. -DDLIB_USE_CUDA=1 -DUSE_AVX_INSTRUCTIONS=1 && \
+    cmake --build . && \
+    cd /tmp/dlib && \
+    python setup.py install --set USE_AVX_INSTRUCTIONS=1 --set DLIB_USE_CUDA=1
 
 # install face recognition
-RUN pip3 install face_recognition
+RUN pip3 install \
+    face_recognition \
+    bing_image_downloader \
+    elasticsearch \
+    label-studio \
+    tqdm \
+    pyprind \
+    python-slugify
 
+RUN conda install -c conda-forge -y ruamel.yaml
+
+
+RUN chown -R 42420:42420 /opt/conda
+
+###### INSTALL OPENDISTRO #####@
+WORKDIR /usr/opt/
+
+RUN wget https://d3g5vo6xdbdb9a.cloudfront.net/tarball/opendistro-elasticsearch/opendistroforelasticsearch-1.13.1-linux-x64.tar.gz && \
+	tar -xf opendistroforelasticsearch-1.13.1-linux-x64.tar.gz && \
+	rm opendistroforelasticsearch-1.13.1-linux-x64.tar.gz
+
+EXPOSE 9200
+
+# Home server
+COPY home-server.sh home-server.html run_all.sh /usr/bin/
+EXPOSE 8080
+
+# MOTD
+COPY motd.sh /usr/bin/motd.sh
+
+##### SETUP SUPERVISORD #########
+COPY supervisor.conf /etc/supervisor/supervisor.conf
+
+###### LABEL STUDIO ######
+ENV RW_BASE_DIR=/workspace/code-and-model
+ENV LABEL_STUDIO_DATABASE_DIR=$RW_BASE_DIR/label-studio/database
+
+ENV LABEL_STUDIO_DATABASE=label_studio.sqlite3 \
+    LABEL_STUDIO_DATABASE_FULL_PATH=$LABEL_STUDIO_DATABASE_DIR/$LABEL_STUDIO_DATABASE \
+    LABEL_STUDIO_DATA_DIR=$RW_BASE_DIR/label-studio/data \
+    LABEL_STUDIO_PORT=8083
+EXPOSE 8083
+
+##### SETUP WORKSPACE ######
 WORKDIR /workspace
+
+COPY upload_to_label_studio.py /workspace
+
+RUN git clone https://github.com/databuzzword/face_recognition.git face_recognition_example
+
+RUN chown -R 42420:42420 /workspace
+
+ENTRYPOINT []
+CMD ["run_all.sh"]
